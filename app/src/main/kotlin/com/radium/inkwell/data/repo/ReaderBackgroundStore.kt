@@ -81,7 +81,8 @@ class ReaderBackgroundStore(context: Context) {
             val ext = displayName.substringAfterLast('.', "").lowercase()
             if (ext !in IMAGE_EXTENSIONS) error("只支持 JPG / PNG / WebP 图片")
             if (size != null && size > MAX_IMAGE_BYTES) throw imageTooLarge()
-            val tmp = File.createTempFile("bg", ".tmp", dir)
+            // createTempFile 的前缀至少 3 个字符，"bg" 会直接抛 Prefix string too short
+            val tmp = File.createTempFile("bg_", ".tmp", dir)
             temp = tmp
             resolver.openInputStream(uri)?.use { input ->
                 tmp.outputStream().use { out -> copyImageBytes(input, out, MAX_IMAGE_BYTES) }
