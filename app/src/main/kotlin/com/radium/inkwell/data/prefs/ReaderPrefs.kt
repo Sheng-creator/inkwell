@@ -326,7 +326,11 @@ class ReaderPrefs(
     internal suspend fun restoreBackup(backup: BackupSettings): Boolean {
         var applied = false
         context.readerDataStore.edit { p ->
-            applied = ReaderBackupImport.apply(p, backup, fontAvailable, backgroundAvailable)
+            applied = ReaderBackupImport.apply(
+                p, backup,
+                fontAvailable = fontAvailable,
+                backgroundAvailable = backgroundAvailable,
+            )
         }
         return applied
     }
@@ -371,9 +375,12 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings): Boolean = rest
 internal object ReaderBackupImport {
     private val keys = ReaderPrefs.Keys
 
+    // 参数顺序别动：fontAvailable 必须留在最后 —— 既有调用（含测试）用尾随 lambda 传它，
+    // 把带默认值的 backgroundAvailable 排在它后面会让尾随 lambda 改绑、fontAvailable 反而没人传
     fun apply(
-        p: MutablePreferences, backup: BackupSettings, fontAvailable: (String) -> Boolean,
+        p: MutablePreferences, backup: BackupSettings,
         backgroundAvailable: (String) -> Boolean = { true },
+        fontAvailable: (String) -> Boolean,
     ): Boolean {
         if (backup.updatedAt <= (p[keys.UPDATED_AT] ?: 0L)) return false
         val v = backup.values
