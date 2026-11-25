@@ -79,29 +79,29 @@ class ReaderBackgroundStore(context: Context) {
             dir.mkdirs()
             val (displayName, size) = queryFileInfo(uri)
             val ext = displayName.substringAfterLast('.', "").lowercase()
-            if (ext !in IMAGE_EXTENSIONS) error("只支持 JPG / PNG / WebP 图片")
+            if (ext !in IMAGE_EXTENSIONS) throw BackgroundImportException("只支持 JPG / PNG / WebP 图片")
             if (size != null && size > MAX_IMAGE_BYTES) throw imageTooLarge()
             // createTempFile 的前缀至少 3 个字符，"bg" 会直接抛 Prefix string too short
             val tmp = File.createTempFile("bg_", ".tmp", dir)
             temp = tmp
             resolver.openInputStream(uri)?.use { input ->
                 tmp.outputStream().use { out -> copyImageBytes(input, out, MAX_IMAGE_BYTES) }
-            } ?: error("无法读取所选文件")
+            } ?: throw BackgroundImportException("无法读取所选文件")
 
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(tmp.absolutePath, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("这不是能用的图片文件")
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw BackgroundImportException("这不是能用的图片文件")
             currentCoroutineContext().ensureActive()
 
             val base = sanitize(displayName.substringBeforeLast('.'))
             val dest = if (max(bounds.outWidth, bounds.outHeight) > MAX_DIMENSION) {
                 // 太大：解码缩放后转存 JPEG。背景图不需要透明通道，JPEG 体积也小得多
                 val target = uniqueFile(base, "jpg")
-                val scaled = decodeScaled(tmp, bounds) ?: error("这不是能用的图片文件")
+                val scaled = decodeScaled(tmp, bounds) ?: throw BackgroundImportException("这不是能用的图片文件")
                 try {
                     target.outputStream().use { out ->
                         if (!scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)) {
-                            throw IOException("保存背景图片失败")
+                            throw BackgroundImportException("保存背景图片失败")
                         }
                     }
                 } finally {
@@ -111,7 +111,7 @@ class ReaderBackgroundStore(context: Context) {
                 target
             } else {
                 val target = uniqueFile(base, ext)
-                if (!tmp.renameTo(target)) throw IOException("保存背景图片失败")
+                if (!tmp.renameTo(target)) throw BackgroundImportException("保存背景图片失败")
                 target
             }
             temp = null
@@ -198,6 +198,12 @@ private suspend fun copyImageBytes(input: java.io.InputStream, output: java.io.O
 }
 
 private fun imageTooLarge() =
-    IOException("图片文件超过 32 MiB 导入上限，请选择较小的图片。")
+    BackgroundImportException("图片文件超过 32 MiB 导入上限，请选择较小的图片。")
+
+/**
+ * 导入时已知的、可直接展示给用户的原因。其它异常（比如系统底层抛的英文错误）
+ * 一律不在这里透传原文 —— ViewModel 会兜底成一句通用的中文提示。
+ */
+class BackgroundImportException(message: String) : IOException(message)
 
 private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")

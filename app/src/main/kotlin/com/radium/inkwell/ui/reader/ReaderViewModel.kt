@@ -18,6 +18,7 @@ import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.LayoutScheme
+import com.radium.inkwell.data.repo.BackgroundImportException
 import com.radium.inkwell.data.repo.ReaderBackgroundStore
 import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.data.repo.FontImportStage
@@ -1081,7 +1082,10 @@ class ReaderViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _backgroundImportError.value = e.message ?: "无法导入所选图片"
+                // 已知原因（格式/大小/读不出/存不下）直接展示；其它异常只给一句通用提示，
+                // 别把底层英文原文（比如 "Prefix string too short"）透给用户
+                _backgroundImportError.value =
+                    if (e is BackgroundImportException) e.message else "背景图片导入失败，请换一张图片再试"
             }
         }
     }
