@@ -1,9 +1,16 @@
 package com.radium.inkwell.ui.reader
 
 import android.database.ContentObserver
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
+import com.radium.inkwell.data.repo.ReaderBackgroundStore
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.blockTouchesBelow
 import com.radium.inkwell.ui.components.sheetBottomInset
 import com.radium.inkwell.util.UsageLog
@@ -191,6 +198,10 @@ fun ReaderMenu(
     onCommitSettings: () -> Unit,
     onSelectPaper: (String) -> Unit,
     onCommitCustomPaper: () -> Unit,
+    onImportBackground: (Uri) -> Unit,
+    onClearBackground: () -> Unit,
+    backgroundImportError: String?,
+    onDismissBackgroundImportError: () -> Unit,
     onSetTextSelection: (Boolean) -> Unit,
     typography: TypographyActions,
     onSearchSources: () -> Unit,
@@ -495,6 +506,10 @@ fun ReaderMenu(
                         onCommit = onCommitSettings,
                         onSelectPaper = onSelectPaper,
                         onCommitCustomPaper = onCommitCustomPaper,
+                        onImportBackground = onImportBackground,
+                        onClearBackground = onClearBackground,
+                        backgroundImportError = backgroundImportError,
+                        onDismissBackgroundImportError = onDismissBackgroundImportError,
                         textSelectionEnabled = session.textSelectionEnabled,
                         onTextSelectionChange = onSetTextSelection,
                         typography = typography,
@@ -991,6 +1006,10 @@ private fun TypographyPanel(
     onCommit: () -> Unit,
     onSelectPaper: (String) -> Unit,
     onCommitCustomPaper: () -> Unit,
+    onImportBackground: (Uri) -> Unit,
+    onClearBackground: () -> Unit,
+    backgroundImportError: String?,
+    onDismissBackgroundImportError: () -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
     typography: TypographyActions,
@@ -1037,6 +1056,10 @@ private fun TypographyPanel(
                         onCommit = onCommit,
                         onSelectPaper = onSelectPaper,
                         onCommitCustomPaper = onCommitCustomPaper,
+                        onImportBackground = onImportBackground,
+                        onClearBackground = onClearBackground,
+                        backgroundImportError = backgroundImportError,
+                        onDismissBackgroundImportError = onDismissBackgroundImportError,
                         typography = typography,
                         dragging = dragging,
                         onDragging = onDragging,
@@ -1192,6 +1215,10 @@ private fun MainPage(
     onCommit: () -> Unit,
     onSelectPaper: (String) -> Unit,
     onCommitCustomPaper: () -> Unit,
+    onImportBackground: (Uri) -> Unit,
+    onClearBackground: () -> Unit,
+    backgroundImportError: String?,
+    onDismissBackgroundImportError: () -> Unit,
     typography: TypographyActions,
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
@@ -1242,6 +1269,15 @@ private fun MainPage(
                             onChangeFinished = onCommitCustomPaper,
                         )
                     }
+                }
+                Column(Modifier.padding(horizontal = Dimens.listHorizontal)) {
+                    BackgroundImageSection(
+                        settings = settings,
+                        onImport = onImportBackground,
+                        onClear = onClearBackground,
+                        importError = backgroundImportError,
+                        onDismissImportError = onDismissBackgroundImportError,
+                    )
                 }
                 HorizontalDivider(Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS))
                 FontSection(
@@ -2007,6 +2043,67 @@ private fun CustomPaperEditor(
         else MiuixTheme.colorScheme.error,
         modifier = Modifier.padding(top = Dimens.gapS, bottom = Dimens.gapXS),
     )
+}
+
+/**
+ * 自定义背景图片：选一张图铺满整页，盖在纸色上；文字颜色仍归当前纸张管 ——
+ * 图深字浅这件事由用户换一张深色纸解决，面板里把分工写明，别让他对着浅字配深图猜哪儿出了问题。
+ *
+ * 跟自定义纸色一样按日/夜槽分别记（ReaderSettings.backgroundImage 已是当前槽解析后的值）。
+ * 文件归 ReaderBackgroundStore 管，这里只拿文件名找它要缩略图。
+ */
+@Composable
+private fun BackgroundImageSection(
+    settings: ReaderSettings,
+    onImport: (Uri) -> Unit,
+    onClear: () -> Unit,
+    importError: String?,
+    onDismissImportError: () -> Unit,
+) {
+    // 图片就按图片筛：与字体不同，图片的 MIME 各家相册报得一致，不必放开到 */*
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(onImport)
+    }
+    val store = koinInject<ReaderBackgroundStore>()
+    val name = settings.backgroundImage
+    Row(
+        Modifier.fillMaxWidth().padding(top = Dimens.gapS),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+    ) {
+        Text("背景图片", style = MiuixTheme.textStyles.body1, modifier = Modifier.weight(1f))
+        if (name != null) {
+            AsyncImage(
+                model = store.resolve(name),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(Dimens.swatch).clip(AppShapes.small),
+            )
+            AppTextButton("更换", onClick = { picker.launch(arrayOf("image/*")) })
+            AppTextButton("清除", onClick = onClear, contentColor = MiuixTheme.colorScheme.error)
+        } else {
+            AppTextButton("选择图片", onClick = { picker.launch(arrayOf("image/*")) })
+        }
+    }
+    Text(
+        text = "图片铺满整页、盖住纸色，文字颜色仍按当前纸张；日间、夜间分别保存。",
+        style = MiuixTheme.textStyles.footnote1,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        modifier = Modifier.padding(top = Dimens.gapXS, bottom = Dimens.gapXS),
+    )
+    importError?.let { error ->
+        AppAlertDialog(
+            onDismissRequest = onDismissImportError,
+            title = "背景图片导入失败",
+            text = error,
+            confirmText = "重新选择",
+            closeOnConfirm = true,
+            onConfirm = {
+                onDismissImportError()
+                picker.launch(arrayOf("image/*"))
+            },
+        )
+    }
 }
 
 /**

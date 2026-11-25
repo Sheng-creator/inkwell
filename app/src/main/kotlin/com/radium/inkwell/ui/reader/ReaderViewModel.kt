@@ -18,6 +18,8 @@ import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.LayoutScheme
+import com.radium.inkwell.data.repo.BackgroundImportException
+import com.radium.inkwell.data.repo.ReaderBackgroundStore
 import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.data.repo.FontImportStage
 import com.radium.inkwell.data.repo.ReadingClock
@@ -287,6 +289,7 @@ class ReaderViewModel(
     private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
     private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
     private val fontStore: ReaderFontStore,
+    private val backgroundStore: ReaderBackgroundStore,
     private val readingStats: ReadingStatsRepository,
     private val readHealth: SourceReadHealth,
 ) : ViewModel() {
@@ -1046,6 +1049,61 @@ class ReaderViewModel(
         viewModelScope.launch {
             readerPrefs.deleteLayoutScheme(name)
             messageBus.emit("已删除排版方案「$name」")
+        }
+    }
+
+    // ---------- 背景图片 ----------
+
+    /**
+     * 当前日夜槽背景图的解码结果。文件名变了才重解（切日夜槽也会换名）；
+     * 文件不在或解不出时为 null，页面退回纸色 —— 设置里挂着一个已删文件的名字不该让阅读页出错。
+     */
+    val backgroundBitmap: StateFlow<ImageBitmap?> = readerPrefs.settings
+        .map { it.backgroundImage }
+        .distinctUntilChanged()
+        .map { name -> withContext(Dispatchers.IO) { name?.let { backgroundStore.loadBitmap(it) } } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val _backgroundImportError = MutableStateFlow<String?>(null)
+    val backgroundImportError = _backgroundImportError.asStateFlow()
+
+    fun dismissBackgroundImportError() { _backgroundImportError.value = null }
+
+    /** 导入成功就直接用上，与导入字体同一条规矩 */
+    fun importBackground(uri: Uri) {
+        dismissBackgroundImportError()
+        viewModelScope.launch {
+            try {
+                val name = backgroundStore.import(uri).getOrThrow()
+                val replaced = _state.value.settings.backgroundImage
+                readerPrefs.setBackgroundImage(name)
+                deleteBackgroundIfOrphan(replaced)
+                messageBus.emit("已设置背景图片")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 已知原因（格式/大小/读不出/存不下）直接展示；其它异常只给一句通用提示，
+                // 别把底层英文原文（比如 "Prefix string too short"）透给用户
+                _backgroundImportError.value =
+                    if (e is BackgroundImportException) e.message else "背景图片导入失败，请换一张图片再试"
+            }
+        }
+    }
+
+    fun clearBackground() {
+        viewModelScope.launch {
+            val removed = _state.value.settings.backgroundImage ?: return@launch
+            readerPrefs.setBackgroundImage(null)
+            deleteBackgroundIfOrphan(removed)
+        }
+    }
+
+    /** 文件只在日/夜两槽都不再引用时才删 —— 两槽可能共用同一张（同名文件只存一份） */
+    private suspend fun deleteBackgroundIfOrphan(name: String?) {
+        if (name == null) return
+        val (day, night) = readerPrefs.backgroundImageNames()
+        if (day != name && night != name) {
+            runCatching { backgroundStore.delete(name) }
         }
     }
 

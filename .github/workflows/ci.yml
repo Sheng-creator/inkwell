@@ -9,8 +9,29 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_SIGNING: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v7
+
+      # 配了签名 Secrets（与 release.yml 同一组）就用它签 debug/release 两个包：
+      # 签名固定，之后的构建才能覆盖安装。没配就什么都不写，Gradle 自动回落
+      # 每次运行随机生成的 debug 签名（现状）。密码只经 $GITHUB_ENV 传给后续步骤。
+      - name: Decode signing keystore (optional)
+        if: env.HAS_SIGNING == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          {
+            echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"
+            echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "SIGNING_KEY_ALIAS=$KEY_ALIAS"
+            echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v6
@@ -46,6 +67,17 @@ jobs:
         with:
           name: inkwell-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # 瘦身版：release 变体开 R8 + 资源压缩，体积与官方包同量级。
+      # 签名同上：配了 Secrets 用固定签名，没配回落 debug 签名。
+      - name: Build release APK (minified)
+        run: ./gradlew assembleRelease
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: inkwell-release
+          path: app/build/outputs/apk/release/app-release.apk
 
       - name: Upload test reports on failure
         if: failure()

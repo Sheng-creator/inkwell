@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
@@ -96,6 +97,8 @@ fun PageFlipContainer(
     next: RenderablePage?,
     layout: LayoutSpec,
     theme: ReaderTheme,
+    /** 自定义背景图（已解码）；null = 纯纸色。换图必须让卷页位图失效重渲，见 [CurlRequest.sameContent] */
+    backgroundImage: ImageBitmap? = null,
     animation: FlipAnimation,
     /**
      * 是否允许播放动画（系统「移除动画」的取反）。由 ReaderScreen 透传 ——
@@ -570,18 +573,21 @@ fun PageFlipContainer(
             // 滚动模式根本不该走到这里 —— 它是另一条渲染路径，由 ReaderScreen 分流。
             // 万一走到了（比如设置迁移遗漏），静态画当前页，总好过崩溃或白屏。
             FlipAnimation.NONE, FlipAnimation.SCROLL ->
-                PageCanvas(shownCurrent, layout, theme, selection = painted)
+                PageCanvas(shownCurrent, layout, theme, selection = painted, backgroundImage = backgroundImage)
             FlipAnimation.SLIDE -> SlideLayers(
                 painted, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
+                backgroundImage,
             )
             FlipAnimation.COVER -> CoverLayers(
                 painted, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
+                backgroundImage,
             )
             FlipAnimation.CURL -> CurlLayer(
                 selection = painted,
                 current = shownCurrent, prev = shownPrev, next = shownNext,
                 // heldPages 只有两页。预渲染跟随真实邻页，避免短暂的空槽淘汰仍可复用的位图。
-                request = CurlRequest(current, prev, next, layout, theme, density),
+                request = CurlRequest(current, prev, next, layout, theme, density, backgroundImage),
+                backgroundImage = backgroundImage,
                 preferPrevious = lastCommittedDirection == FlipDirection.BACKWARD,
                 layout = layout, theme = theme, direction = direction,
                 offset = offset,
@@ -608,16 +614,17 @@ private fun SlideLayers(
     direction: FlipDirection?,
     offset: MutableFloatState,
     width: Float,
+    backgroundImage: ImageBitmap? = null,
 ) {
     when (direction) {
-        null -> PageCanvas(current, layout, theme, selection = selection)
+        null -> PageCanvas(current, layout, theme, selection = selection, backgroundImage = backgroundImage)
         FlipDirection.FORWARD -> {
-            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue })
-            PageCanvas(next, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue + width })
+            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue }, backgroundImage = backgroundImage)
+            PageCanvas(next, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue + width }, backgroundImage = backgroundImage)
         }
         FlipDirection.BACKWARD -> {
-            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue })
-            PageCanvas(prev, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue - width })
+            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue }, backgroundImage = backgroundImage)
+            PageCanvas(prev, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue - width }, backgroundImage = backgroundImage)
         }
     }
 }
@@ -633,23 +640,26 @@ private fun CoverLayers(
     direction: FlipDirection?,
     offset: MutableFloatState,
     width: Float,
+    backgroundImage: ImageBitmap? = null,
 ) {
     when (direction) {
-        null -> PageCanvas(current, layout, theme, selection = selection)
+        null -> PageCanvas(current, layout, theme, selection = selection, backgroundImage = backgroundImage)
         FlipDirection.FORWARD -> {
             // 下页静止在底，当前页被拖走并带右缘阴影
-            PageCanvas(next, layout, theme)
+            PageCanvas(next, layout, theme, backgroundImage = backgroundImage)
             PageCanvas(
                 current, layout, theme,
                 Modifier.graphicsLayer { translationX = offset.floatValue }.edgeShadow(),
+                backgroundImage = backgroundImage,
             )
         }
         FlipDirection.BACKWARD -> {
             // 上一页从左滑入盖住当前页
-            PageCanvas(current, layout, theme)
+            PageCanvas(current, layout, theme, backgroundImage = backgroundImage)
             PageCanvas(
                 prev, layout, theme,
                 Modifier.graphicsLayer { translationX = offset.floatValue - width }.edgeShadow(),
+                backgroundImage = backgroundImage,
             )
         }
     }
@@ -692,6 +702,7 @@ private fun CurlLayer(
     flipId: Int,
     onTrace: (ReaderTrace) -> Unit,
     selection: TextSelection? = null,
+    backgroundImage: ImageBitmap? = null,
 ) {
     // 闲时也预渲，但放到 Default：主线程不再被 remember { renderPageBitmap } 卡住。
     // 位图是不可变 ARGB（见 renderPageBitmap）。哪一页的旧图还对得上就原样留用，
@@ -747,13 +758,13 @@ private fun CurlLayer(
             }
     }
     if (size.width <= 1 || size.height <= 1) {
-        PageCanvas(current, layout, theme, selection = selection)
+        PageCanvas(current, layout, theme, selection = selection, backgroundImage = backgroundImage)
         return
     }
     val renderer = remember(size) { CurlRenderer(size.width.toFloat(), size.height.toFloat()) }
 
     if (direction == null) {
-        PageCanvas(current, layout, theme, selection = selection)
+        PageCanvas(current, layout, theme, selection = selection, backgroundImage = backgroundImage)
         return
     }
     val frontPage = if (direction == FlipDirection.FORWARD) current else prev
@@ -774,7 +785,7 @@ private fun CurlLayer(
                     ReaderTrace.Render.CURL_PENDING_PAGE, pendingPage, curlGrip = grip),
             )
         }
-        PageCanvas(current, layout, theme, selection = selection)
+        PageCanvas(current, layout, theme, selection = selection, backgroundImage = backgroundImage)
         return
     }
     // 连翻后可直接找上一轮相同内容的图，不必等后台把位图挪到新的槽位。
@@ -806,6 +817,7 @@ private fun CurlLayer(
     if (render == ReaderTrace.Render.SLIDE) {
         SlideLayers(
             selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
+            backgroundImage,
         )
         return
     }
@@ -818,9 +830,9 @@ private fun CurlLayer(
             }
             // 底页不参与卷曲变形，位图未完成时可在露出的区域画真实页面。
             val drawLiveUnder: (() -> Unit)? = if (under == null && underPage != null) {
-                { drawPage(underPage, layout, theme) }
+                { drawPage(underPage, layout, theme, backgroundImage = backgroundImage) }
             } else null
-            val drawLiveFront: (() -> Unit)? = liveFront?.let { page -> { drawPage(page, layout, theme) } }
+            val drawLiveFront: (() -> Unit)? = liveFront?.let { page -> { drawPage(page, layout, theme, backgroundImage = backgroundImage) } }
             drawIntoCanvas { canvas ->
                 renderer.draw(
                     canvas.nativeCanvas,
@@ -871,9 +883,12 @@ private class CurlRequest(
     val layout: LayoutSpec,
     val theme: ReaderTheme,
     val density: androidx.compose.ui.unit.Density,
+    /** 背景图按引用比：换一张图（新解码出的对象）必须让整套卷页位图失效重渲 */
+    val backgroundImage: ImageBitmap? = null,
 ) {
     fun sameContent(other: CurlRequest): Boolean =
         layout == other.layout && theme == other.theme && density == other.density &&
+            backgroundImage == other.backgroundImage &&
             current.matches(other.current?.curlKey()) &&
             prev.matches(other.prev?.curlKey()) &&
             next.matches(other.next?.curlKey())
@@ -898,7 +913,7 @@ private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest, previousOnly:
         if (page == null) return null
         reusable?.bitmapFor(page.curlKey())?.let { return it }
         if (!renderIfMissing) return null
-        return renderPageAndroidBitmap(page, req.layout, req.theme, req.density)
+        return renderPageAndroidBitmap(page, req.layout, req.theme, req.density, req.backgroundImage)
     }
     val current = obtain(req.current, renderIfMissing = !previousOnly)
     val prev = obtain(req.prev, renderIfMissing = true)
@@ -913,6 +928,7 @@ private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest, previousOnly:
         layout = req.layout,
         theme = req.theme,
         density = req.density,
+        backgroundImage = req.backgroundImage,
     )
 }
 
@@ -921,7 +937,8 @@ private fun renderPageAndroidBitmap(
     layout: LayoutSpec,
     theme: ReaderTheme,
     density: androidx.compose.ui.unit.Density,
-): android.graphics.Bitmap = renderPageBitmap(page, layout, theme, density).asAndroidBitmap()
+    backgroundImage: ImageBitmap? = null,
+): android.graphics.Bitmap = renderPageBitmap(page, layout, theme, density, backgroundImage).asAndroidBitmap()
 
 private fun recycleBitmap(bmp: android.graphics.Bitmap?) {
     if (bmp != null && !bmp.isRecycled) bmp.recycle()
@@ -941,6 +958,7 @@ private class CurlBitmaps(
     val layout: LayoutSpec,
     val theme: ReaderTheme,
     val density: androidx.compose.ui.unit.Density,
+    val backgroundImage: ImageBitmap? = null,
 ) {
     fun bitmapFor(key: CurlPageKey): android.graphics.Bitmap? = when (key) {
         currentKey -> current
@@ -950,7 +968,8 @@ private class CurlBitmaps(
     }
 
     fun matchesStyle(req: CurlRequest): Boolean =
-        layout == req.layout && theme == req.theme && density == req.density
+        layout == req.layout && theme == req.theme && density == req.density &&
+            backgroundImage == req.backgroundImage
 
     fun recycleAll() {
         recycleBitmap(current)

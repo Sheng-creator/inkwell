@@ -135,6 +135,8 @@ fun ReaderScreen(
 ) = Scaffold(Modifier.fillMaxSize(), containerColor = Color.Transparent) {
     val pageUi by viewModel.page.collectAsStateWithLifecycle()
     val session by viewModel.session.collectAsStateWithLifecycle()
+    val backgroundBitmap by viewModel.backgroundBitmap.collectAsStateWithLifecycle()
+    val backgroundImportError by viewModel.backgroundImportError.collectAsStateWithLifecycle()
     val overlay by viewModel.overlay.collectAsStateWithLifecycle()
     val speech = viewModel.speech
     val speechState by speech.state.collectAsStateWithLifecycle()
@@ -603,6 +605,7 @@ fun ReaderScreen(
                             next = pageUi.nextPage,
                             layout = layout,
                             theme = session.settings.theme,
+                            backgroundImage = backgroundBitmap,
                             hasPrev = pageUi.hasPrev,
                             hasNext = pageUi.hasNext,
                             gesturesEnabled = !overlay.menuVisible &&
@@ -691,6 +694,7 @@ fun ReaderScreen(
                             next = pageUi.nextPage,
                             layout = layout,
                             theme = session.settings.theme,
+                            backgroundImage = backgroundBitmap,
                             animation = session.settings.flipAnimation,
                             animationsEnabled = animationsEnabled(),
                             hapticOnFlip = session.settings.flipHaptic,
@@ -948,6 +952,10 @@ fun ReaderScreen(
             onCommitSettings = { viewModel.commitSettings() },
             onSelectPaper = viewModel::selectPaper,
             onCommitCustomPaper = viewModel::commitCustomPaper,
+            onImportBackground = viewModel::importBackground,
+            onClearBackground = viewModel::clearBackground,
+            backgroundImportError = backgroundImportError,
+            onDismissBackgroundImportError = viewModel::dismissBackgroundImportError,
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },

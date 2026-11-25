@@ -79,6 +79,15 @@ data class ReaderSettings(
     /** 当前日夜模式保存的自定义纸色，即使正在使用预设也保留。 */
     val customPaper: ReaderTheme = ReaderTheme.DEFAULT_CUSTOM,
     val bodyFontWeight: Int = FONT_WEIGHT_NORMAL,
+    /**
+     * 自定义阅读背景图片的文件名（文件在 app 的背景图目录里，见 app 层 ReaderBackgroundStore），
+     * 日/夜槽各存一份，跟自定义纸色一样由 app 层按当前日夜解析后喂进来。
+     *
+     * 只存文件名不存路径 —— 与 [FONT_FILE_PREFIX] 同理：设置会随 WebDAV 同步，路径换台机器就是死的；
+     * 本机没有这个文件时不生效，页面退回 [theme] 的纸色。null = 没设背景图。
+     * 图只盖纸面，文字颜色仍归 [theme] 管。
+     */
+    val backgroundImage: String? = null,
 ) {
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */
