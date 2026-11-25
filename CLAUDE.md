@@ -83,6 +83,7 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 - **槽位含义与 M3 不同**：`secondary` 是关着的开关轨道、`secondaryVariant` 是默认按钮底、`secondaryContainer` 是输入框底（都是中性灰）；淡强调底 + 强调色字用 `tertiaryContainer` / `onTertiaryContainer`（下拉菜单选中项、选中 chip、设置图标底）；`primaryContainer` / `onPrimaryContainer` Miuix 组件不读，保留 M3 含义。
 - 正文性小字用 `onSurfaceVariantSummary`（对比度在 `AppThemesTest` 里钉住 ≥ 4.5:1，页面底和卡片上都测），**不要**用 `outline` / `dividerLine`（那是给边框/分隔线的）。
 - **唯一例外**：阅读器**内容区**颜色（纸色/字色）走 `ReaderTheme` / `ReaderThemeScope`（`app/.../ui/reader/ReaderThemeScope.kt`），这是有意的独立主题；但阅读器 UI 的尺寸/动效仍走上面的令牌。阅读器里的浮层用 `ReaderThemeScope` 包裹，让开关/滑块/分隔线自动协调，别挨个传色。浮层底用 `readerOverlayColor()`、浮层里的卡用 `readerCardColor()`。浮层的强调色**跟纸走**（`paperAccent`）：有色的纸取纸的色相（米色一族统一是褐），无色的纸才用 App 主色 —— HyperOS 蓝压在米色纸上不协调。
+- **自定义背景图片**（fork 功能）：`ReaderSettings.backgroundImage` 只存文件名，文件在 `filesDir/backgrounds/`（`ReaderBackgroundStore` 管导入/存删，导入时长边压到 2560、超限转 JPEG）；日/夜槽各一份（`bg_image_day` / `bg_image_night`），解析后只盖纸面 —— `drawPage` 先垫纸色再 `drawCoverImage` 居中裁切铺满，字色仍归 `ReaderTheme`。四种翻页模式都吃同一张图；卷页位图按背景图**引用**失效重渲（`CurlRequest.sameContent` / `CurlBitmaps.matchesStyle`），换图不刷掉位图就会翻出旧背景。与字体同一条线：**文件不进 WebDAV**，备份只同步文件名，本机没这个文件就不生效（`ReaderPrefs.backgroundAvailable` 守门），文件名经 `resolve()` 防路径穿越。
 
 ### 界面用词：不出现「书源」
 

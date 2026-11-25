@@ -62,12 +62,31 @@ fun DrawScope.drawPage(
     layout: LayoutSpec,
     theme: ReaderTheme,
     selection: TextSelection? = null,
+    backgroundImage: ImageBitmap? = null,
 ) {
     val bg = Color(theme.background)
     drawRect(bg)
+    if (backgroundImage != null) drawCoverImage(backgroundImage)
     if (page == null) return
     val contentTop = layout.marginTopPx + layout.headerHeightPx
     drawPageItems(page, layout, theme, originY = contentTop + page.loneImageShift(layout), selection = selection)
+}
+
+/**
+ * 背景图：铺满整个绘制面，居中裁切（cover）。纸色先垫底 —— 图有透明区时不露白。
+ * 实时绘制与翻页位图共用这一份，卷页前后的背景才不会跳。
+ */
+internal fun DrawScope.drawCoverImage(bitmap: ImageBitmap) {
+    val scale = maxOf(size.width / bitmap.width, size.height / bitmap.height)
+    val srcW = (size.width / scale).toInt().coerceIn(1, bitmap.width)
+    val srcH = (size.height / scale).toInt().coerceIn(1, bitmap.height)
+    drawImage(
+        image = bitmap,
+        srcOffset = IntOffset((bitmap.width - srcW) / 2, (bitmap.height - srcH) / 2),
+        srcSize = IntSize(srcW, srcH),
+        dstOffset = IntOffset.Zero,
+        dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+    )
 }
 
 /**
@@ -197,8 +216,9 @@ fun PageCanvas(
     theme: ReaderTheme,
     modifier: Modifier = Modifier,
     selection: TextSelection? = null,
+    backgroundImage: ImageBitmap? = null,
 ) {
-    Spacer(modifier.fillMaxSize().drawBehind { drawPage(page, layout, theme, selection) })
+    Spacer(modifier.fillMaxSize().drawBehind { drawPage(page, layout, theme, selection, backgroundImage) })
 }
 
 /**
@@ -216,6 +236,7 @@ fun renderPageBitmap(
     layout: LayoutSpec,
     theme: ReaderTheme,
     density: Density,
+    backgroundImage: ImageBitmap? = null,
 ): ImageBitmap {
     val width = layout.viewportWidthPx.coerceAtLeast(1)
     val height = layout.viewportHeightPx.coerceAtLeast(1)
@@ -229,7 +250,7 @@ fun renderPageBitmap(
         Canvas(software.asImageBitmap()),
         Size(width.toFloat(), height.toFloat()),
     ) {
-        drawPage(page, layout, theme)
+        drawPage(page, layout, theme, backgroundImage = backgroundImage)
     }
     val immutable = software.copy(android.graphics.Bitmap.Config.ARGB_8888, /* isMutable = */ false)
     if (immutable != null) {

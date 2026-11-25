@@ -43,6 +43,8 @@ private val Context.readerDataStore by preferencesDataStore(
 class ReaderPrefs(
     private val context: Context,
     private val fontAvailable: (String) -> Boolean = { true },
+    /** 背景图片文件在本机能不能用（见 ReaderBackgroundStore.isAvailable），只在导入备份时用，与 [fontAvailable] 同理 */
+    private val backgroundAvailable: (String) -> Boolean = { true },
 ) {
 
     internal object Keys {
@@ -66,6 +68,9 @@ class ReaderPrefs(
         val CUSTOM_DAY_TEXT = longPreferencesKey("custom_day_text")
         val CUSTOM_NIGHT_BG = longPreferencesKey("custom_night_bg")
         val CUSTOM_NIGHT_TEXT = longPreferencesKey("custom_night_text")
+        /** 自定义背景图片文件名，日/夜各一份；文件本体不进备份（与字体同一条线），备份只带文件名 */
+        val BG_IMAGE_DAY = stringPreferencesKey("bg_image_day")
+        val BG_IMAGE_NIGHT = stringPreferencesKey("bg_image_night")
         val FLIP = stringPreferencesKey("flip")
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
@@ -146,6 +151,7 @@ class ReaderPrefs(
             letterSpacingEm = p[Keys.LETTER_SPACING] ?: 0f,
             theme = ReaderPaperPrefs.active(p, dark, customPaper),
             customPaper = customPaper,
+            backgroundImage = if (dark) p[Keys.BG_IMAGE_NIGHT] else p[Keys.BG_IMAGE_DAY],
             flipAnimation = p[Keys.FLIP]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
                 ?: FlipAnimation.COVER,
             brightnessOverride = p[Keys.BRIGHTNESS]?.takeIf { it >= 0f },
@@ -233,6 +239,21 @@ class ReaderPrefs(
         }
     }
 
+    /** 设置当前日夜槽的背景图片文件名；null = 清除。文件本体的存删归 ReaderBackgroundStore */
+    suspend fun setBackgroundImage(name: String?) {
+        val key = if (darkActive.value) Keys.BG_IMAGE_NIGHT else Keys.BG_IMAGE_DAY
+        context.readerDataStore.edit { p ->
+            if (name == null) p.remove(key) else p[key] = name
+            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+        }
+    }
+
+    /** 日/夜两槽的背景图文件名。删文件前先看另一槽是否还在引用同一张，避免误删 */
+    suspend fun backgroundImageNames(): Pair<String?, String?> {
+        val p = context.readerDataStore.data.first()
+        return p[Keys.BG_IMAGE_DAY] to p[Keys.BG_IMAGE_NIGHT]
+    }
+
     /** 排版方案。跟阅读设置同一个 DataStore、同一个时间戳，WebDAV 里也随阅读设置整块走 */
     val layoutSchemes: StateFlow<List<LayoutScheme>> = context.readerDataStore.data
         .map { LayoutSchemeCodec.decode(it[Keys.LAYOUT_SCHEMES]) }
@@ -266,6 +287,8 @@ class ReaderPrefs(
                 "custom_day_text" to (p[Keys.CUSTOM_DAY_TEXT] ?: p[Keys.CUSTOM_TEXT])?.toString().orEmpty(),
                 "custom_night_bg" to p[Keys.CUSTOM_NIGHT_BG]?.toString().orEmpty(),
                 "custom_night_text" to p[Keys.CUSTOM_NIGHT_TEXT]?.toString().orEmpty(),
+                "bg_image_day" to p[Keys.BG_IMAGE_DAY].orEmpty(),
+                "bg_image_night" to p[Keys.BG_IMAGE_NIGHT].orEmpty(),
                 "font_size_sp" to s.fontSizeSp.toString(),
                 "title_scale" to s.titleScale.toString(),
                 "title_top_spacing" to s.titleTopSpacingDp.toString(),
@@ -303,7 +326,7 @@ class ReaderPrefs(
     internal suspend fun restoreBackup(backup: BackupSettings): Boolean {
         var applied = false
         context.readerDataStore.edit { p ->
-            applied = ReaderBackupImport.apply(p, backup, fontAvailable)
+            applied = ReaderBackupImport.apply(p, backup, fontAvailable, backgroundAvailable)
         }
         return applied
     }
@@ -350,6 +373,7 @@ internal object ReaderBackupImport {
 
     fun apply(
         p: MutablePreferences, backup: BackupSettings, fontAvailable: (String) -> Boolean,
+        backgroundAvailable: (String) -> Boolean = { true },
     ): Boolean {
         if (backup.updatedAt <= (p[keys.UPDATED_AT] ?: 0L)) return false
         val v = backup.values
@@ -378,6 +402,14 @@ internal object ReaderBackupImport {
         (v["custom_day_text"] ?: v["theme_custom_text"])?.toLongOrNull()?.let { p[keys.CUSTOM_DAY_TEXT] = it }
         v["custom_night_bg"]?.toLongOrNull()?.let { p[keys.CUSTOM_NIGHT_BG] = it }
         v["custom_night_text"]?.toLongOrNull()?.let { p[keys.CUSTOM_NIGHT_TEXT] = it }
+        // 背景图与字体同一条线：只同步文件名，本机没有这个文件就不拿远端的名字覆盖本地；
+        // 远端明确为空（没设背景图）则跟着清掉，整块 LWW 的语义不变
+        listOf("bg_image_day" to keys.BG_IMAGE_DAY, "bg_image_night" to keys.BG_IMAGE_NIGHT)
+            .forEach { (name, key) ->
+                val value = v[name] ?: return@forEach
+                if (value.isBlank()) p.remove(key)
+                else if (backgroundAvailable(value)) p[key] = value
+            }
         v["layout_schemes"]?.let { p[keys.LAYOUT_SCHEMES] = it }
         p[keys.UPDATED_AT] = backup.updatedAt
         return true

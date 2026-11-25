@@ -38,6 +38,7 @@ import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.TextSelection
+import com.radium.inkwell.reader.render.drawCoverImage
 import com.radium.inkwell.reader.render.drawPageItems
 import com.radium.inkwell.reader.render.extendSelection
 import com.radium.inkwell.reader.render.imageAt
@@ -77,6 +78,8 @@ fun ScrollPageReader(
     /** 回传选区所在的页、该页相对普通翻页坐标的纵向偏移、选区。 */
     onTextSelection: ((PageSpec, Float, TextSelection) -> Unit)? = null,
     onClearSelection: () -> Unit = {},
+    /** 自定义背景图（已解码）；null = 纯纸色。纸色仍垫底，图居中裁切铺满 */
+    backgroundImage: androidx.compose.ui.graphics.ImageBitmap? = null,
 ) {
     val traceLatest = rememberUpdatedState(onTrace)
     fun trace(action: ReaderTrace.Action, dir: FlipDirection? = null) {
@@ -244,7 +247,10 @@ fun ScrollPageReader(
         modifier
             .fillMaxSize()
             .onSizeChanged { size = it }
-            .drawBehind { drawRect(Color(theme.background)) }
+            .drawBehind {
+                drawRect(Color(theme.background))
+                if (backgroundImage != null) drawCoverImage(backgroundImage)
+            }
             // 读屏：本页文字 + 翻页 / 开菜单两个动作（见 readerPageSemantics）
             .readerPageSemantics(
                 page = current,
